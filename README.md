@@ -130,3 +130,137 @@ Kubernetes-based Request & Notification System.
 4. Проверить логи `notification-service`.
 
 Если оба лога показывают одну и ту же заявку, то задание закрыто по сути.
+
+## Как запустить
+
+Ниже приведён минимальный сценарий запуска проекта в локальном `minikube`.
+
+### 1. Предварительные требования
+
+Нужно, чтобы были установлены:
+
+* `Docker`
+* `kubectl`
+* `minikube`
+* `Java 17`
+* `Maven`
+
+### 2. Проверить локально тесты
+
+```bash
+cd services/request-service
+mvn test
+
+cd ../notification-service
+mvn test
+```
+
+### 3. Запустить `minikube`
+
+```bash
+minikube start
+minikube addons enable ingress
+```
+
+Проверить текущий контекст:
+
+```bash
+kubectl config current-context
+```
+
+Ожидаемо: `minikube`.
+
+### 4. Собрать Docker-образы
+
+Из корня проекта:
+
+```bash
+docker build -t request-service:local services/request-service
+docker build -t notification-service:local services/notification-service
+```
+
+### 5. Загрузить образы в `minikube`
+
+```bash
+minikube image load request-service:local
+minikube image load notification-service:local
+```
+
+### 6. Применить Kubernetes-манифесты
+
+```bash
+kubectl apply -f k8s/
+```
+
+Проверить, что всё поднялось:
+
+```bash
+kubectl get pods
+kubectl get svc
+kubectl get ingress
+```
+
+### 7. Дождаться готовности сервисов
+
+```bash
+kubectl rollout status deployment/request-service
+kubectl rollout status deployment/notification-service
+kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx
+```
+
+## Как проверить
+
+### Вариант 1. Через `minikube tunnel`
+
+В отдельном терминале:
+
+```bash
+minikube tunnel
+```
+
+После этого можно отправить запрос через Ingress:
+
+```bash
+curl -i http://127.0.0.1/requests -H 'Content-Type: application/json' -d '{"text":"demo"}'
+```
+
+### Вариант 2. Через `port-forward` ingress-контроллера
+
+Если `minikube tunnel` просит `sudo` или неудобен, можно проверить Ingress так:
+
+```bash
+kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8088:80
+```
+
+В другом терминале:
+
+```bash
+curl -i http://127.0.0.1:8088/requests \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"demo"}'
+```
+
+Ожидаемый ответ:
+
+```json
+{"requestId":"<uuid>","status":"created"}
+```
+
+### Проверка логов
+
+После успешного запроса нужно проверить логи обоих сервисов:
+
+```bash
+kubectl logs deployment/request-service --since=5m
+kubectl logs deployment/notification-service --since=5m
+```
+
+В логах должно быть видно:
+
+* в `request-service`:
+  * создание заявки
+  * отправку уведомления
+* в `notification-service`:
+  * получение того же `requestId`
+
+Если один и тот же `requestId` есть в ответе API и в логах обоих сервисов, значит цепочка `Ingress -> request-service -> notification-service` работает корректно.

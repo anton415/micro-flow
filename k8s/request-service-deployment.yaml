@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: request-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: request-service
+  template:
+    metadata:
+      labels:
+        app: request-service
+    spec:
+      containers:
+        - name: request-service
+          image: request-service:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
