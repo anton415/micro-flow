@@ -1,84 +1,99 @@
-# Архитектура проекта: Микросервисная система
+# Минимальная архитектура проекта
 
-## Обзор
-Система состоит из двух микросервисов, развернутых в Kubernetes:
-- **Request Service**: Принимает заявки от пользователей.
-- **Notification Service**: Получает уведомления от Request Service.
+## Идея
 
-Взаимодействие через HTTP. Внешний доступ через Ingress.
+Нужна самая простая микросервисная схема, которая показывает 3 вещи:
 
-## API спецификация
+1. всё живёт внутри Kubernetes
+2. внешний трафик идёт через Ingress
+3. один сервис вызывает другой по DNS-имени Kubernetes
 
-### Request Service
-- **Endpoint**: `POST /requests`
-- **Тело запроса** (JSON):
-  ```json
-  {
-    "description": "string",
-    "user": "string"  // опционально
-  }
-  ```
-- **Ответ** (JSON):
-  ```json
-  {
-    "id": "uuid",
-    "status": "registered",
-    "timestamp": "ISO 8601"
-  }
-  ```
+## Состав системы
 
-### Notification Service
-- **Endpoint**: `POST /notifications`
-- **Тело запроса** (JSON):
-  ```json
-  {
-    "requestId": "uuid",
-    "message": "string",
-    "timestamp": "ISO 8601"
-  }
-  ```
-- **Ответ**: `200 OK` с подтверждением.
+### `request-service`
+- публичный сервис
+- принимает `POST /requests`
+- генерирует `requestId`
+- вызывает `notification-service`
+- возвращает клиенту успешный ответ
 
-## Структура данных
+### `notification-service`
+- внутренний сервис
+- принимает `POST /notifications`
+- пишет лог о полученной нотификации
+- наружу через Ingress не публикуется
 
-### Заявка (Request)
+## Поток запроса
+
+1. Клиент вызывает `POST /requests` через Ingress.
+2. Ingress проксирует запрос в `request-service`.
+3. `request-service` создаёт заявку и генерирует ID.
+4. `request-service` отправляет HTTP-запрос на `http://notification-service/notifications`.
+5. `notification-service` пишет событие в лог.
+6. `request-service` возвращает клиенту `requestId`.
+
+## Минимальные API
+
+### `request-service`
+
+`POST /requests`
+
+Пример тела:
+
 ```json
 {
-  "id": "uuid",
-  "description": "string",
-  "user": "string",
-  "status": "registered|processed",
-  "createdAt": "ISO 8601",
-  "updatedAt": "ISO 8601"
+  "text": "test request"
 }
 ```
 
-### Нотификация (Notification)
+Пример ответа:
+
 ```json
 {
-  "id": "uuid",
   "requestId": "uuid",
-  "message": "Request registered: {description}",
-  "createdAt": "ISO 8601"
+  "status": "created"
 }
 ```
 
-## Взаимодействие сервисов
-1. Пользователь отправляет POST /requests в Request Service через Ingress.
-2. Request Service сохраняет заявку (in-memory) и генерирует ID.
-3. Request Service отправляет POST /notifications в Notification Service.
-4. Notification Service логирует нотификацию.
+### `notification-service`
 
-## Технологии
-- Язык: Node.js (Express.js)
-- Хранение: In-memory (для демо)
-- Коммуникация: HTTP (axios)
-- Контейнеризация: Docker
-- Оркестрация: Kubernetes (Minikube)
+`POST /notifications`
 
-## Диаграмма архитектуры
+Пример тела:
+
+```json
+{
+  "requestId": "uuid"
+}
 ```
-[User] → [Ingress] → [Request Service] → [Notification Service]
-                    ↓
-               [Kubernetes Cluster]
+
+Ответ:
+
+```json
+{
+  "status": "accepted"
+}
+```
+
+## Что специально упрощаем
+
+- без базы данных
+- без очередей
+- без отдельного UI
+- без асинхронности
+- без сложной бизнес-логики
+
+## Диаграмма
+
+```text
+[Client]
+   |
+   v
+[Ingress]
+   |
+   v
+[request-service]
+   |
+   v  HTTP via Kubernetes DNS
+[notification-service]
 ```
